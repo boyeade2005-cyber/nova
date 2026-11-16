@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="nova-star" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF6B00"/>
+      <stop offset="0.55" stop-color="#FF2A5F"/>
+      <stop offset="1" stop-color="#FFD1B3"/>
+    </linearGradient>
+    <radialGradient id="nova-halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FF6B00" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#FF6B00" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="1" y="1" width="46" height="46" rx="14" fill="#0D0D12"/>
+  <circle cx="24" cy="24" r="17" fill="url(#nova-halo)"/>
+  <path d="M24 8.5c1.9 6.8 4.7 9.5 11.5 11.5-6.8 2-9.6 4.7-11.5 11.5-1.9-6.8-4.7-9.5-11.5-11.5 6.8-2 9.6-4.7 11.5-11.5z" fill="url(#nova-star)"/>
+  <circle cx="35.5" cy="12.5" r="2.4" fill="#FFD1B3"/>
+  <circle cx="35.5" cy="12.5" r="4" fill="#FFD1B3" opacity="0.25"/>
+</svg>
