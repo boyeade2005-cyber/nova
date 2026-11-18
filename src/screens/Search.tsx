@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Search, X, Users, FileText, UsersRound } from "lucide-react";
+import { Search, X, Users, FileText, UsersRound, MessageCircle } from "lucide-react";
 import { Avatar, VerifiedBadge } from "../components/Avatar";
 import { searchProfiles, fetchCommunities, fetchFeedPosts, followUser } from "../lib/api";
+import { searchMessages, type MessageSearchResult } from "../lib/engagement";
 import type { Post } from "../data/mock";
 
-type Scope = "All" | "People" | "Communities" | "Posts";
+type Scope = "All" | "People" | "Communities" | "Posts" | "Messages";
 
 const mapUser = (p: any) => ({
   id: p.id,
@@ -21,6 +22,7 @@ export function SearchScreen({ onClose }: { onClose: () => void }) {
   const [people, setPeople] = useState<any[]>([]);
   const [comms, setComms] = useState<any[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [messages, setMessages] = useState<MessageSearchResult[]>([]);
   const [allComms, setAllComms] = useState<any[]>([]);
   const [allPosts, setAllPosts] = useState<Post[]>([]);
   const [following, setFollowing] = useState<Record<string, boolean>>({});
@@ -33,19 +35,21 @@ export function SearchScreen({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const t = setTimeout(() => {
       const q = query.trim().toLowerCase();
-      if (!q) { setPeople([]); setComms([]); setPosts([]); return; }
+      if (!q) { setPeople([]); setComms([]); setPosts([]); setMessages([]); return; }
       void searchProfiles(query).then(setPeople);
       setComms(allComms.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 6));
       setPosts(allPosts.filter((p) => p.text.toLowerCase().includes(q) || p.topics.some((tp) => tp.toLowerCase().includes(q))).slice(0, 6));
+      void searchMessages(query).then(setMessages);
     }, 250);
     return () => clearTimeout(t);
   }, [query, allComms, allPosts]);
 
-  const scopes: Scope[] = ["All", "People", "Communities", "Posts"];
+  const scopes: Scope[] = ["All", "People", "Communities", "Posts", "Messages"];
   const empty = !query.trim() && scope === "All";
   const showPeople = scope === "All" || scope === "People";
   const showComms = scope === "All" || scope === "Communities";
   const showPosts = scope === "All" || scope === "Posts";
+  const showMessages = scope === "All" || scope === "Messages";
 
   return (
     <div className="fixed inset-0 z-50 bg-bg flex flex-col">
@@ -145,7 +149,32 @@ export function SearchScreen({ onClose }: { onClose: () => void }) {
           </section>
         )}
 
-        {query.trim() && people.length + comms.length + posts.length === 0 && (
+        {showMessages && messages.length > 0 && (
+          <section className="mb-5">
+            <h3 className="text-xs font-bold uppercase tracking-wide text-muted mb-2 flex items-center gap-1.5"><MessageCircle size={13} /> Messages</h3>
+            <div className="space-y-1">
+              {messages.map((m) => (
+                <div key={m.id} className="px-3 py-2.5 rounded-2xl">
+                  <div className="flex items-center gap-2">
+                    <Avatar
+                      user={{
+                        id: m.sender.id, name: m.sender.name, handle: m.sender.handle,
+                        avatarColor: m.sender.avatarColor, avatarEmoji: m.sender.avatarEmoji,
+                      }}
+                      size={28}
+                    />
+                    <p className="text-sm font-bold truncate">{m.sender.name}</p>
+                    <span className="text-[10px] text-muted truncate">in {m.conversationName}</span>
+                    <span className="ml-auto text-[10px] text-muted shrink-0">{new Date(m.createdAt).toLocaleDateString()}</span>
+                  </div>
+                  <p className="text-sm text-muted line-clamp-2 mt-1">{m.text}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {query.trim() && people.length + comms.length + posts.length + messages.length === 0 && (
           <div className="text-center py-14 text-muted">
             <p className="text-4xl mb-2">🫥</p>
             <p className="font-bold text-ink">No results for "{query}"</p>

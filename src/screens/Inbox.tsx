@@ -14,7 +14,7 @@ import {
   type RemoteConversation,
 } from "../lib/api";
 import { startCall } from "../lib/calls";
-import { DM_EVENT, DM_STORAGE_KEY } from "../lib/profileExtra";
+import { DM_EVENT, DM_STORAGE_KEY, ensureDM } from "../lib/profileExtra";
 import { TranslateButton } from "../components/Translate";
 
 function convoTitle(c: RemoteConversation): string {
@@ -61,13 +61,22 @@ export function InboxScreen() {
   };
   useEffect(load, []);
 
-  // Auto-open a conversation handed off from Profile's "Message" button
+  // Auto-open a conversation handed off from Profile/UserProfile "Message"
+  // buttons. The handoff may carry a conversation id directly, or a user id
+  // that we turn into a DM via ensureDM first.
   useEffect(() => {
     const openById = async (convoId?: string) => {
       if (!convoId) return;
       const list = await fetchConversations();
       const found = list.find((c) => c.id === convoId);
-      if (found) setActive(found);
+      if (found) { setActive(found); return; }
+      // Not an existing conversation — maybe it's a user id: ensure the DM.
+      const ensured = await ensureDM(convoId);
+      if (ensured) {
+        const refreshed = await fetchConversations();
+        const convo = refreshed.find((c) => c.id === ensured);
+        if (convo) setActive(convo);
+      }
     };
     try {
       const pending = localStorage.getItem(DM_STORAGE_KEY);
@@ -76,7 +85,11 @@ export function InboxScreen() {
         void openById(pending);
       }
     } catch { /* storage unavailable */ }
-    const handler = (e: Event) => void openById((e as CustomEvent<{ conversationId?: string }>).detail?.conversationId);
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent<string | { conversationId?: string; userId?: string }>).detail;
+      const id = typeof d === "string" ? d : (d?.conversationId ?? d?.userId);
+      void openById(id);
+    };
     window.addEventListener(DM_EVENT, handler);
     return () => window.removeEventListener(DM_EVENT, handler);
   }, []);

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   Moon, Sun, Download, Clock, Bell, Shield, Globe, KeyRound,
   Smartphone, Fingerprint, History, BadgeCheck, LifeBuoy, Info, UserPlus, Check,
-  Lock, Mail, Copy, Trash2, Heart, MessageCircle, Sparkles,
+  Lock, Mail, Copy, Trash2, Heart, MessageCircle, Sparkles, ShieldCheck,
 } from "lucide-react";
 import { BottomSheet } from "../components/BottomSheet";
 import { Avatar } from "../components/Avatar";
@@ -14,6 +14,8 @@ import {
   exportUserData, deleteOwnAccount,
   type BlockedUser,
 } from "../lib/profileExtra";
+import { isAdmin } from "../lib/moderation";
+import { ModerationScreen } from "./Moderation";
 
 const REGIONS = [
   "Global", "Nigeria", "Ghana", "Kenya", "South Africa", "Egypt", "Ethiopia", "Morocco",
@@ -80,6 +82,8 @@ export function SettingsScreen({ dark, onToggleTheme, onBack }: { dark: boolean;
   const [referCopied, setReferCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [admin, setAdmin] = useState(false);
+  const [showModeration, setShowModeration] = useState(false);
 
   // password sheet
   const [pwCurrent, setPwCurrent] = useState("");
@@ -99,6 +103,7 @@ export function SettingsScreen({ dark, onToggleTheme, onBack }: { dark: boolean;
 
   useEffect(() => {
     void fetchSettings().then(setSettings);
+    void isAdmin().then(setAdmin);
   }, []);
 
   const pickRegion = async (r: string) => {
@@ -194,6 +199,10 @@ export function SettingsScreen({ dark, onToggleTheme, onBack }: { dark: boolean;
     ? new Date(authUser.last_sign_in_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : null;
 
+  if (showModeration) {
+    return <ModerationScreen onBack={() => setShowModeration(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-bg">
       <header className="sticky top-0 z-30 bg-bg/90 backdrop-blur-lg border-b border-line flex items-center gap-3 px-4 h-14">
@@ -261,6 +270,18 @@ export function SettingsScreen({ dark, onToggleTheme, onBack }: { dark: boolean;
           <Row icon={LifeBuoy} label="Help center" hint="FAQs, contact & safety info" onClick={() => openSheet("help")} />
           <Row icon={Info} label="About Nova" hint="Version 0.1.0 · Your world. Your choice." onClick={() => openSheet("about")} />
         </div>
+
+        {admin && (
+          <div>
+            <p className="px-4 text-xs font-bold uppercase tracking-wide text-muted mb-1 pt-3">Administration</p>
+            <Row
+              icon={ShieldCheck}
+              label="Moderation queue"
+              hint="Review reports and moderation actions"
+              onClick={() => setShowModeration(true)}
+            />
+          </div>
+        )}
 
         <div className="pt-3 px-4">
           <button onClick={() => openSheet("delete")} className="w-full h-11 rounded-2xl border border-coral/40 text-coral font-bold text-sm flex items-center justify-center gap-2">

@@ -292,9 +292,12 @@ export async function exportUserData(): Promise<Record<string, unknown> | null> 
 
 export async function deleteOwnAccount(): Promise<{ ok: boolean; error?: string }> {
   if (!isSupabaseConfigured) return { ok: false, error: "Supabase is not configured." };
-  const { error } = await supabase.rpc("delete_own_account");
-  if (error) return { ok: false, error: error.message };
-  return { ok: true };
+  // edge function wipes content AND removes the auth user; falls back to the RPC
+  const { data, error } = await supabase.functions.invoke("delete-account", { method: "POST" });
+  if (!error && data?.ok) return { ok: true };
+  const { error: rpcError } = await supabase.rpc("delete_own_account");
+  if (rpcError) return { ok: false, error: rpcError.message };
+  return { ok: true, error: "content deleted — auth account removal pending" };
 }
 
 /** Fire-and-forget helpers used by Profile/Inbox for the DM handoff. */

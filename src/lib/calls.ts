@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { ICE_SERVERS } from "./rtc";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export type CallKind = "voice" | "video";
@@ -39,11 +40,6 @@ interface State {
   incoming: IncomingCall | null;
   call: ActiveCall | null;
 }
-
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
 
 const RING_TIMEOUT_MS = 45_000;
 

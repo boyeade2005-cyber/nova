@@ -7,6 +7,7 @@ import { LiveScreen } from "./Live";
 import { GiftSheet } from "../components/GiftSheet";
 import { fetchPulseVideos, fetchLiveStreams, togglePulseLike, fetchMyPulseLikes } from "../lib/api";
 import { fetchPulseComments, addPulseComment, subscribeToPulseComments, shareLink, type PulseComment } from "../lib/socialExtra";
+import { OPEN_POST_EVENT } from "../lib/profiles";
 import { toLiveStream } from "./Discover";
 import type { LiveStream } from "../data/mock";
 
@@ -81,7 +82,7 @@ function PulseCommentsSheet({ pulseId, onClose }: { pulseId: string; onClose: ()
   );
 }
 
-function PulseCard({ v, likedByMe, onLike }: { v: RemotePulse; likedByMe: boolean; onLike: (id: string, like: boolean) => void }) {
+function PulseCard({ v, likedByMe, onLike, onOpenProfile }: { v: RemotePulse; likedByMe: boolean; onLike: (id: string, like: boolean) => void; onOpenProfile?: (userId: string) => void }) {
   const [liked, setLiked] = useState(likedByMe);
   const [saved, setSaved] = useState(false);
   const [likes, setLikes] = useState(v.likes);
@@ -111,7 +112,7 @@ function PulseCard({ v, likedByMe, onLike }: { v: RemotePulse; likedByMe: boolea
   };
 
   return (
-    <div className="relative w-full h-full snap-start snap-always overflow-hidden bg-nova-black">
+    <div id={`pulse-${v.id}`} className="relative w-full h-full snap-start snap-always overflow-hidden bg-nova-black">
       {/* Video area */}
       {v.videoUrl ? (
         <video src={v.videoUrl} autoPlay loop muted playsInline className="absolute inset-0 w-full h-full object-cover" />
@@ -168,13 +169,16 @@ function PulseCard({ v, likedByMe, onLike }: { v: RemotePulse; likedByMe: boolea
 
       {/* Bottom info */}
       <div className="absolute left-4 right-20 bottom-6 text-white">
-        <div className="flex items-center gap-2.5 mb-2">
+        <button
+          onClick={() => onOpenProfile?.(v.creator.id)}
+          className="flex items-center gap-2.5 mb-2 text-left"
+        >
           <Avatar user={v.creator} size={36} />
           <div>
-            <p className="font-bold text-sm drop-shadow">@{v.creator.handle}</p>
+            <p className="font-bold text-sm drop-shadow flex items-center gap-1">@{v.creator.handle}</p>
             <p className="text-xs text-white/80">{v.creator.location ?? "Nova"}</p>
           </div>
-        </div>
+        </button>
         <p className="text-sm font-semibold drop-shadow line-clamp-2">{v.caption}</p>
         <div className="mt-2 flex items-center gap-1.5 text-xs bg-black/30 backdrop-blur rounded-full px-3 py-1.5 w-fit">
           <Music size={12} className="text-hot-pink animate-pulse" />
@@ -185,13 +189,21 @@ function PulseCard({ v, likedByMe, onLike }: { v: RemotePulse; likedByMe: boolea
   );
 }
 
-export function PulseScreen() {
+export function PulseScreen({
+  focusPulse,
+  onOpenProfile,
+}: {
+  /** Deep-link target: scroll to and highlight this pulse when it loads. */
+  focusPulse?: { id: string; n: number } | null;
+  onOpenProfile?: (userId: string) => void;
+}) {
   const [videos, setVideos] = useState<RemotePulse[]>([]);
   const [streams, setStreams] = useState<LiveStream[]>([]);
   const [liveOpen, setLiveOpen] = useState(false);
   const [liveIdx, setLiveIdx] = useState(0);
   const [loading, setLoading] = useState(true);
   const [myLikes, setMyLikes] = useState<Set<string>>(new Set());
+  const [eventFocusId, setEventFocusId] = useState<string | null>(null);
 
   useEffect(() => {
     void Promise.all([fetchPulseVideos(), fetchLiveStreams(), fetchMyPulseLikes()]).then(([vs, ss, likes]) => {
@@ -213,6 +225,37 @@ export function PulseScreen() {
       setLoading(false);
     });
   }, []);
+
+  // Live open-post requests (shares, notifications) — pulse targets only
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent<{ id?: string; pulse?: boolean }>).detail;
+      if (d?.id && d.pulse) setEventFocusId(d.id);
+    };
+    window.addEventListener(OPEN_POST_EVENT, handler);
+    return () => window.removeEventListener(OPEN_POST_EVENT, handler);
+  }, []);
+
+  // Scroll to + highlight a deep-linked pulse once it exists in the DOM.
+  const focusId = focusPulse?.id ?? eventFocusId;
+  useEffect(() => {
+    if (!focusId || loading) return;
+    let tries = 0;
+    const scroll = () => {
+      const el = document.getElementById(`pulse-${focusId}`);
+      if (!el) return false;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("ring-2", "ring-inset", "ring-hot-pink");
+      window.setTimeout(() => el.classList.remove("ring-2", "ring-inset", "ring-hot-pink"), 2600);
+      return true;
+    };
+    if (scroll()) return;
+    const t = window.setInterval(() => {
+      tries += 1;
+      if (scroll() || tries > 25) window.clearInterval(t);
+    }, 400);
+    return () => window.clearInterval(t);
+  }, [focusId, loading, videos.length]);
 
   const handleLike = (id: string, like: boolean) => {
     void togglePulseLike(id, like);
@@ -248,7 +291,7 @@ export function PulseScreen() {
         </button>
       )}
       {videos.map((v) => (
-        <PulseCard key={v.id} v={v} likedByMe={myLikes.has(v.id)} onLike={handleLike} />
+        <PulseCard key={v.id} v={v} likedByMe={myLikes.has(v.id)} onLike={handleLike} onOpenProfile={onOpenProfile} />
       ))}
       {liveOpen && streams[liveIdx] && (
         <LiveScreen

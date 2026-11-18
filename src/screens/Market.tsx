@@ -14,6 +14,9 @@ import {
   toggleProductFavorite, fetchProductOffers, createOffer, respondToOffer,
   placeOrder, fetchMyOrders, completeOrder, cancelOrder,
 } from "../lib/marketplace";
+import {
+  latestOrderIdFor, setOrderShipping, type ShippingAddress,
+} from "../lib/engagement";
 
 const fmtPrice = (n: number) => `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
@@ -571,18 +574,36 @@ function BuyConfirm({ product, onDone, notify }: { product: any; onDone: () => v
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [shipName, setShipName] = useState("");
+  const [shipLine1, setShipLine1] = useState("");
+  const [shipCity, setShipCity] = useState("");
+  const [shipCountry, setShipCountry] = useState("");
+  const [shipNote, setShipNote] = useState("");
 
   const submit = async () => {
     setBusy(true);
     setError(null);
     const res = await placeOrder(product.id);
-    setBusy(false);
     if (!res.ok) {
+      setBusy(false);
       setError(res.error?.includes("insufficient_funds")
         ? "Not enough NOVA coins — top up your wallet first."
         : "Couldn't place order — the item may no longer be available.");
       return;
     }
+    // Attach shipping details to the fresh order (best-effort).
+    const orderId = await latestOrderIdFor(product.id);
+    if (orderId) {
+      const addr: ShippingAddress = {};
+      if (shipName.trim()) addr.name = shipName.trim();
+      if (shipLine1.trim()) addr.line1 = shipLine1.trim();
+      if (shipCity.trim()) addr.city = shipCity.trim();
+      if (shipCountry.trim()) addr.country = shipCountry.trim();
+      if (Object.keys(addr).length || shipNote.trim()) {
+        await setOrderShipping(orderId, addr, shipNote);
+      }
+    }
+    setBusy(false);
     setDone(true);
     notify("Order placed — funds held in escrow 🛡️");
     setTimeout(onDone, 1100);
@@ -605,6 +626,18 @@ function BuyConfirm({ product, onDone, notify }: { product: any; onDone: () => v
       <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 text-xs text-muted flex gap-2">
         <ShieldCheck size={16} className="text-emerald-500 shrink-0 mt-0.5" />
         <span><b className="text-ink">Nova Escrow:</b> the full amount is deducted now and held safely. The seller is paid 90% only after you confirm the item arrived. Platform fee: 10%.</span>
+      </div>
+      <div className="card !rounded-2xl p-3.5">
+        <p className="text-xs font-bold flex items-center gap-1.5 mb-2"><Truck size={13} className="text-nova-purple" /> Shipping details <span className="text-muted font-semibold">(optional)</span></p>
+        <div className="space-y-2">
+          <input value={shipName} onChange={(e) => setShipName(e.target.value)} placeholder="Full name" className="w-full bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+          <input value={shipLine1} onChange={(e) => setShipLine1(e.target.value)} placeholder="Street address" className="w-full bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+          <div className="flex gap-2">
+            <input value={shipCity} onChange={(e) => setShipCity(e.target.value)} placeholder="City" className="flex-1 bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+            <input value={shipCountry} onChange={(e) => setShipCountry(e.target.value)} placeholder="Country" className="flex-1 bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+          </div>
+          <input value={shipNote} onChange={(e) => setShipNote(e.target.value)} placeholder="Note for the seller (optional)" className="w-full bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+        </div>
       </div>
       {error && <p className="text-xs text-coral font-semibold flex items-center gap-1"><AlertCircle size={13} /> {error}</p>}
       <button
@@ -631,6 +664,8 @@ function OrdersView({ notify }: { notify: (m: string) => void }) {
   }, [role]);
   const list = orders.role === role ? orders.list : null;
 
+  const reload = () => { void fetchMyOrders(role).then((d) => setOrders({ role, list: d })); };
+
   const act = async (orderId: string, kind: "complete" | "cancel") => {
     setBusy(orderId);
     const res = kind === "complete" ? await completeOrder(orderId) : await cancelOrder(orderId);
@@ -641,7 +676,7 @@ function OrdersView({ notify }: { notify: (m: string) => void }) {
     } else {
       notify(kind === "complete" ? "Order completed — seller paid 🛡️" : "Order cancelled — buyer refunded");
     }
-    void fetchMyOrders(role).then((d) => setOrders({ role, list: d }));
+    reload();
   };
 
   return (
@@ -726,12 +761,77 @@ function OrdersView({ notify }: { notify: (m: string) => void }) {
                     )}
                   </div>
                 )}
+                <OrderShipping order={o} editable={role === "buying" && held} onSaved={reload} />
                 {o.status === "completed" && role === "selling" && (
                   <p className="text-[11px] text-emerald-500 font-semibold mt-2">Seller paid 90% — platform fee 10% 🛡️</p>
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrderShipping({ order, editable, onSaved }: { order: any; editable: boolean; onSaved: () => void }) {
+  const addr = (order.shipping_address ?? {}) as Record<string, string>;
+  const hasDetails = Object.values(addr).some(Boolean) || !!order.buyer_note;
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(addr.name ?? "");
+  const [line1, setLine1] = useState(addr.line1 ?? "");
+  const [city, setCity] = useState(addr.city ?? "");
+  const [country, setCountry] = useState(addr.country ?? "");
+  const [note, setNote] = useState(order.buyer_note ?? "");
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    await setOrderShipping(order.id, { name, line1, city, country }, note);
+    setBusy(false);
+    setOpen(false);
+    onSaved();
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-line">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-extrabold uppercase tracking-wide text-muted flex items-center gap-1">
+          <Truck size={11} /> Shipping
+        </p>
+        {editable && (
+          <button onClick={() => setOpen((v) => !v)} className="text-[11px] font-bold text-nova-purple">
+            {open ? "Close" : hasDetails ? "Edit" : "Add details"}
+          </button>
+        )}
+      </div>
+      {!open && hasDetails && (
+        <div className="text-xs text-muted mt-1.5 space-y-0.5">
+          {addr.name && <p className="font-semibold text-ink">{addr.name}</p>}
+          {addr.line1 && <p>{addr.line1}</p>}
+          {(addr.city || addr.country) && <p>{[addr.city, addr.country].filter(Boolean).join(", ")}</p>}
+          {order.buyer_note && <p className="italic">“{order.buyer_note}”</p>}
+        </div>
+      )}
+      {!open && !hasDetails && editable && (
+        <p className="text-xs text-muted mt-1.5">No shipping details yet — add them so the seller can ship.</p>
+      )}
+      {open && editable && (
+        <div className="mt-2 space-y-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" className="w-full bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+          <input value={line1} onChange={(e) => setLine1(e.target.value)} placeholder="Street address" className="w-full bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+          <div className="flex gap-2">
+            <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="City" className="flex-1 bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+            <input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="Country" className="flex-1 bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+          </div>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note for the seller (optional)" className="w-full bg-surface2 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 ring-nova-purple/40" />
+          <button
+            onClick={() => void save()}
+            disabled={busy}
+            className="w-full h-9 rounded-xl nova-gradient text-white text-xs font-bold disabled:opacity-40 press"
+          >
+            {busy ? "Saving…" : "Save shipping details"}
+          </button>
         </div>
       )}
     </div>

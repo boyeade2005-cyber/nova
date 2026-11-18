@@ -9,13 +9,9 @@ import {
   followUser, goLiveNow,
 } from "../lib/api";
 import { supabase } from "../lib/supabase";
+import { ICE_SERVERS } from "../lib/rtc";
 import { useSession } from "../lib/useSession";
 import type { RealtimeChannel } from "@supabase/supabase-js";
-
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
 
 interface LiveChatMsg {
   id: string;

@@ -3,6 +3,7 @@ import { Search, TrendingUp, UserPlus, Radio, Eye, Check } from "lucide-react";
 import { Avatar, VerifiedBadge } from "../components/Avatar";
 import { LiveScreen } from "./Live";
 import { fetchLiveStreams, getSuggestedProfiles, fetchCommunities, fetchFeedPosts, followUser } from "../lib/api";
+import { fetchBlockedIds } from "../lib/moderation";
 import type { LiveStream, User } from "../data/mock";
 
 function mapUser(p: any): User {
@@ -35,7 +36,7 @@ export function toLiveStream(s: any): LiveStream {
   };
 }
 
-export function DiscoverScreen({ onCommunities }: { onCommunities?: () => void }) {
+export function DiscoverScreen({ onCommunities, onOpenProfile }: { onCommunities?: () => void; onOpenProfile?: (userId: string) => void }) {
   const [query, setQuery] = useState("");
   const [streams, setStreams] = useState<LiveStream[]>([]);
   const [people, setPeople] = useState<any[]>([]);
@@ -45,14 +46,32 @@ export function DiscoverScreen({ onCommunities }: { onCommunities?: () => void }
   const [liveIdx, setLiveIdx] = useState<number | null>(null);
 
   useEffect(() => {
-    void fetchLiveStreams().then((s) => setStreams(s.map(toLiveStream)));
-    void getSuggestedProfiles(8).then(setPeople);
-    void fetchCommunities().then((c) => setComms(c.slice(0, 4)));
-    void fetchFeedPosts().then((posts) => {
+    let mounted = true;
+    void (async () => {
+      const [blocked, live, suggested, communities, posts] = await Promise.all([
+        fetchBlockedIds(),
+        fetchLiveStreams(),
+        getSuggestedProfiles(8),
+        fetchCommunities(),
+        fetchFeedPosts(),
+      ]);
+      if (!mounted) return;
+
+      const visible = (id: string | null | undefined) => !id || !blocked.has(id);
+      setStreams(live.filter((s) => visible(s.host?.id)).map(toLiveStream));
+      setPeople(suggested.filter((p) => visible(p.id)));
+      setComms(communities.slice(0, 4));
+
       const counts = new Map<string, number>();
-      for (const p of posts) for (const t of p.topics) counts.set(t, (counts.get(t) ?? 0) + 1);
+      for (const p of posts) {
+        if (!visible(p.author?.id)) continue;
+        for (const t of p.topics) counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
       setTrending([...counts.entries()].map(([tag, posts]) => ({ tag, posts })).sort((a, b) => b.posts - a.posts).slice(0, 6));
-    });
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const toggleFollow = async (id: string) => {
@@ -142,14 +161,16 @@ export function DiscoverScreen({ onCommunities }: { onCommunities?: () => void }
             const u = mapUser(p);
             return (
               <div key={u.id} className="flex items-center gap-3 px-3 py-3 rounded-2xl">
-                <Avatar user={u} size={44} />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1">
-                    <span className="font-bold text-sm truncate">{u.name}</span>
-                    {u.verified && <VerifiedBadge />}
+                <button onClick={() => onOpenProfile?.(u.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+                  <Avatar user={u} size={44} />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1">
+                      <span className="font-bold text-sm truncate">{u.name}</span>
+                      {u.verified && <VerifiedBadge />}
+                    </div>
+                    <div className="text-xs text-muted truncate">@{u.handle} · {u.location ?? "Earth"}</div>
                   </div>
-                  <div className="text-xs text-muted truncate">@{u.handle} · {u.location ?? "Earth"}</div>
-                </div>
+                </button>
                 <button
                   onClick={() => toggleFollow(u.id)}
                   className={`h-9 px-4 rounded-full text-sm font-bold flex items-center gap-1.5 transition-all active:scale-95 ${

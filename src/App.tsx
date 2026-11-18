@@ -12,6 +12,7 @@ import { MarketScreen } from "./screens/Market";
 import { SearchScreen } from "./screens/Search";
 import { LiveScreen } from "./screens/Live";
 import { WalletScreen } from "./screens/Wallet";
+import { UserProfileScreen } from "./screens/UserProfile";
 import { BottomNav, Sidebar } from "./components/Nav";
 import { NovaAIButton, NovaAI } from "./components/NovaAI";
 import { CreateSheet } from "./components/CreateSheet";
@@ -21,6 +22,8 @@ import { TopBar } from "./components/TopBar";
 import { makeLocalPost, type User, type Post, type MediaItem } from "./data/mock";
 import { createRemotePost, fetchNotifications, getSuggestedProfiles } from "./lib/api";
 import { ensureDM, DM_EVENT, DM_STORAGE_KEY } from "./lib/profileExtra";
+import { NAV_EVENT, PROFILE_EVENT, lookupProfileByUsername } from "./lib/profiles";
+import PushManager from "./components/PushManager";
 import { useSession } from "./lib/useSession";
 
 export type Tab = "home" | "discover" | "pulse" | "create" | "market" | "communities" | "inbox" | "profile";
@@ -51,13 +54,62 @@ export default function App() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [notifCount, setNotifCount] = useState(0);
   const [contacts, setContacts] = useState<any[]>([]);
+  // viewUserId: when set, the main pane shows that user's public profile
+  const [viewUserId, setViewUserId] = useState<string | null>(null);
+  // focusPost/focusPulse: deep-link a specific post/pulse into Home/Pulse
+  const [focusPost, setFocusPost] = useState<{ id: string; n: number } | null>(null);
+  const [focusPulse, setFocusPulse] = useState<{ id: string; n: number } | null>(null);
 
   useEffect(() => {
     void fetchNotifications().then((ns) => setNotifCount(ns.filter((n: any) => !n.read).length));
     void getSuggestedProfiles(6).then(setContacts);
   }, []);
 
+  // Cross-screen navigation: nova:navigate { tab, postId?, pulseId? } and
+  // nova:open-profile { userId } — fired by TopBar notifications, UserProfile,
+  // Discover/Pulse taps, Inbox, etc.
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const d = (e as CustomEvent<{ tab?: Tab; postId?: string; pulseId?: string }>).detail ?? {};
+      if (d.tab === "create") { setCreateOpen(true); return; }
+      if (d.tab) setTab(d.tab);
+      if (d.postId) setFocusPost({ id: d.postId, n: Date.now() });
+      if (d.pulseId) {
+        setFocusPulse({ id: d.pulseId, n: Date.now() });
+        if (!d.tab) setTab("pulse");
+      }
+    };
+    const onOpenProfile = (e: Event) => {
+      const d = (e as CustomEvent<{ userId?: string }>).detail;
+      if (d?.userId) setViewUserId(d.userId);
+    };
+    window.addEventListener(NAV_EVENT, onNavigate);
+    window.addEventListener(PROFILE_EVENT, onOpenProfile);
+    return () => {
+      window.removeEventListener(NAV_EVENT, onNavigate);
+      window.removeEventListener(PROFILE_EVENT, onOpenProfile);
+    };
+  }, []);
+
+  // Deep links: ?u=username  ?post=<id>  ?pulse=<id>
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const u = params.get("u");
+    const post = params.get("post");
+    const pulse = params.get("pulse");
+    if (post) { setTab("home"); setFocusPost({ id: post, n: Date.now() }); }
+    if (pulse) { setTab("pulse"); setFocusPulse({ id: pulse, n: Date.now() }); }
+    if (u) {
+      void lookupProfileByUsername(u).then((p) => {
+        if (p) setViewUserId(p.id);
+      });
+    }
+  }, []);
+
+  const openProfile = (userId: string) => setViewUserId(userId);
+
   const handleTab = (t: Tab) => {
+    setViewUserId(null); // explicit tab switch leaves any viewed profile
     if (t === "create") {
       setCreateOpen(true);
       return;
@@ -123,14 +175,24 @@ export default function App() {
 
             <main className="flex-1 min-w-0">
               <div className="max-w-2xl mx-auto">
-                {tab === "home" && <HomeScreen posts={posts} setPosts={setPosts} onGoLive={() => setGoLiveOpen(true)} />}
-                {tab === "discover" && <DiscoverScreen onCommunities={() => setTab("communities")} />}
-                {tab === "pulse" && <PulseScreen />}
-                {tab === "market" && <MarketScreen onMessageSeller={messageSeller} />}
-                {tab === "communities" && <CommunitiesScreen />}
-                {tab === "inbox" && <InboxScreen />}
-                {tab === "profile" && (
-                  <ProfileScreen dark={dark} onToggleTheme={() => setDark((d) => !d)} onSettings={() => setShowSettings(true)} onCommunities={() => setTab("communities")} onWallet={() => setShowWallet(true)} />
+                {viewUserId ? (
+                  viewUserId === profile?.id ? (
+                    <ProfileScreen dark={dark} onToggleTheme={() => setDark((d) => !d)} onSettings={() => setShowSettings(true)} onCommunities={() => setTab("communities")} onWallet={() => setShowWallet(true)} />
+                  ) : (
+                    <UserProfileScreen userId={viewUserId} onBack={() => setViewUserId(null)} />
+                  )
+                ) : (
+                  <>
+                    {tab === "home" && <HomeScreen posts={posts} setPosts={setPosts} onGoLive={() => setGoLiveOpen(true)} focusPost={focusPost} />}
+                    {tab === "discover" && <DiscoverScreen onCommunities={() => setTab("communities")} onOpenProfile={openProfile} />}
+                    {tab === "pulse" && <PulseScreen focusPulse={focusPulse} onOpenProfile={openProfile} />}
+                    {tab === "market" && <MarketScreen onMessageSeller={messageSeller} />}
+                    {tab === "communities" && <CommunitiesScreen />}
+                    {tab === "inbox" && <InboxScreen />}
+                    {tab === "profile" && (
+                      <ProfileScreen dark={dark} onToggleTheme={() => setDark((d) => !d)} onSettings={() => setShowSettings(true)} onCommunities={() => setTab("communities")} onWallet={() => setShowWallet(true)} />
+                    )}
+                  </>
                 )}
               </div>
             </main>
@@ -201,6 +263,7 @@ export default function App() {
           {searchOpen && <SearchScreen onClose={() => setSearchOpen(false)} />}
           {goLiveOpen && <LiveScreen host={me} onClose={() => setGoLiveOpen(false)} />}
           <CallManager />
+          <PushManager />
         </div>
       )}
     </>

@@ -6,6 +6,7 @@ import { Composer } from "../components/Composer";
 import { PostCard } from "../components/PostCard";
 import { CustomizeFeedSheet } from "../components/CustomizeFeedSheet";
 import { fetchFeedPosts, createRemotePost, subscribeToPosts, setReaction, toggleSave } from "../lib/api";
+import { fetchFollowingIds, OPEN_POST_EVENT } from "../lib/profiles";
 import { useSession } from "../lib/useSession";
 
 type FeedTab = "following" | "local" | "global";
@@ -71,16 +72,38 @@ export function HomeScreen({
   posts,
   setPosts,
   onGoLive,
+  focusPost,
 }: {
   posts: Post[];
   setPosts: React.Dispatch<React.SetStateAction<Post[]>>;
   onGoLive?: () => void;
+  /** Deep-link target: scroll to and highlight this post when it (re)appears. */
+  focusPost?: { id: string; n: number } | null;
 }) {
   const [feedTab, setFeedTab] = useState<FeedTab>("following");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [sliders, setSliders] = useState<Record<string, number>>({});
+  const [followingIds, setFollowingIds] = useState<Set<string> | null>(null);
+  const [eventFocusId, setEventFocusId] = useState<string | null>(null);
   const { profile } = useSession();
   const me: User = profile ?? { id: "me", name: "You", handle: "you", avatarColor: "#FF6B00", avatarEmoji: "🦊" };
+
+  useEffect(() => {
+    void fetchFollowingIds().then(setFollowingIds);
+  }, []);
+
+  // Live open-post requests (notifications, shares, other screens)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent<{ id?: string; pulse?: boolean }>).detail;
+      if (d?.id && !d.pulse) {
+        setEventFocusId(d.id);
+        setFeedTab("global"); // make sure the target post is actually rendered
+      }
+    };
+    window.addEventListener(OPEN_POST_EVENT, handler);
+    return () => window.removeEventListener(OPEN_POST_EVENT, handler);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -118,8 +141,39 @@ export function HomeScreen({
       return feed.filter((p) => p.country === myCountry || (!p.country && p.location?.toLowerCase().includes(myCountry.toLowerCase())));
     }
     if (feedTab === "global") return [...feed].reverse();
+    // "following": only posts by people the current user follows
+    if (feedTab === "following") {
+      if (!followingIds) return feed; // still resolving follows — show feed briefly
+      return feed.filter((p) => followingIds.has(p.author.id));
+    }
     return feed;
-  }, [posts, feedTab, me.country]);
+  }, [posts, feedTab, me.country, followingIds]);
+
+  // A deep-linked post may belong to someone we don't follow — show Global.
+  useEffect(() => {
+    if (focusPost) setFeedTab("global");
+  }, [focusPost]);
+
+  // Scroll to + highlight a deep-linked post once it exists in the DOM.
+  const focusId = focusPost?.id ?? eventFocusId;
+  useEffect(() => {
+    if (!focusId) return;
+    let tries = 0;
+    const scroll = () => {
+      const el = document.getElementById(`nova-post-${focusId}`);
+      if (!el) return false;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-nova-purple", "rounded-2xl");
+      window.setTimeout(() => el.classList.remove("ring-2", "ring-nova-purple", "rounded-2xl"), 2600);
+      return true;
+    };
+    if (scroll()) return;
+    const t = window.setInterval(() => {
+      tries += 1;
+      if (scroll() || tries > 25) window.clearInterval(t);
+    }, 400);
+    return () => window.clearInterval(t);
+  }, [focusId, posts]);
 
   const react = (postId: string, r: ReactionType) => {
     const post = posts.find((p) => p.id === postId);
@@ -214,7 +268,9 @@ export function HomeScreen({
           </div>
         ) : (
           filtered.map((p) => (
-            <PostCard key={p.id} post={p} onReact={react} onSave={save} />
+            <div key={p.id} id={`nova-post-${p.id}`}>
+              <PostCard post={p} onReact={react} onSave={save} />
+            </div>
           ))
         )}
       </div>

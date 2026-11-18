@@ -5,6 +5,7 @@ import type { User } from "../data/mock";
 import { Logo } from "./Logo";
 import { Avatar } from "./Avatar";
 import { fetchNotifications, markNotificationsRead } from "../lib/api";
+import { NAV_EVENT, PROFILE_EVENT } from "../lib/profiles";
 
 const topTabs: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: "home", label: "Feed", icon: Home },
@@ -46,6 +47,22 @@ export function TopBar({
   const openNotifs = () => {
     setNotifOpen((o) => !o);
     if (!notifOpen) void markNotificationsRead();
+  };
+
+  // Deep-link a notification: post → Home scrolled to it, actor → their
+  // profile, community → Groups, message → Whispers.
+  const openNotif = (n: any) => {
+    setNotifOpen(false);
+    const actorId = n.actor?.id ?? n.actor_id;
+    if (n.post_id) {
+      window.dispatchEvent(new CustomEvent(NAV_EVENT, { detail: { tab: "home", postId: n.post_id } }));
+    } else if (actorId) {
+      window.dispatchEvent(new CustomEvent(PROFILE_EVENT, { detail: { userId: actorId } }));
+    } else if (n.community_id) {
+      window.dispatchEvent(new CustomEvent(NAV_EVENT, { detail: { tab: "communities" } }));
+    } else if (n.type === "message") {
+      window.dispatchEvent(new CustomEvent(NAV_EVENT, { detail: { tab: "inbox" } }));
+    }
   };
 
   return (
@@ -120,7 +137,11 @@ export function TopBar({
                     <p className="text-center text-sm text-muted py-10">You're all caught up ✨</p>
                   ) : (
                     notifs.map((n: any) => (
-                      <div key={n.id} className="flex items-start gap-3 px-4 py-3 hover:bg-surface2/60">
+                      <button
+                        key={n.id}
+                        onClick={() => openNotif(n)}
+                        className="w-full flex items-start gap-3 px-4 py-3 hover:bg-surface2/60 text-left"
+                      >
                         <Avatar
                           user={{
                             id: n.actor?.id ?? "sys", name: n.actor?.display_name ?? n.actor?.username ?? "Nova",
@@ -137,7 +158,7 @@ export function TopBar({
                           <p className="text-[11px] text-muted mt-0.5">{new Date(n.created_at).toLocaleString()}</p>
                         </div>
                         {!n.read && <span className="w-2.5 h-2.5 rounded-full nova-gradient mt-2 shrink-0" />}
-                      </div>
+                      </button>
                     ))
                   )}
                 </div>
